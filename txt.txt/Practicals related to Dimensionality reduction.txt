@@ -1,0 +1,48 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
+from sklearn.datasets import load_iris
+from sklearn.preprocessing import StandardScaler
+
+# Load dataset
+iris = load_iris()
+X = iris.data
+
+# Standardize features
+scaler = StandardScaler()
+X_std = scaler.fit_transform(X)
+
+# -------------------------------
+# PCA FROM SCRATCH
+# -------------------------------
+
+# Step 1: Covariance matrix
+cov_mat = np.cov(X_std.T)
+
+# Step 2: Eigen decomposition
+eigen_vals, eigen_vecs = np.linalg.eig(cov_mat)
+
+# Step 3: Sort eigenvalues & eigenvectors
+idx = np.argsort(eigen_vals)[::-1]
+eigen_vals = eigen_vals[idx]
+eigen_vecs = eigen_vecs[:, idx]
+
+# Step 4: Project data onto first 2 principal components
+W = eigen_vecs[:, :2]          # projection matrix (4x2)
+X_pca_manual = X_std.dot(W)    # (150 x 2)
+
+# -------------------------------
+# PCA USING SKLEARN
+# -------------------------------
+pca = PCA(n_components=2)
+X_pca = pca.fit_transform(X_std)
+
+# -------------------------------
+# PLOT RESULTS
+# -------------------------------
+plt.figure(figsize=(6,5))
+plt.scatter(X_pca[:, 0], X_pca[:, 1], c=iris.target, cmap='viridis')
+plt.title("PCA using sklearn (2 components)")
+plt.xlabel("PC1")
+plt.ylabel("PC2")
+plt.show()

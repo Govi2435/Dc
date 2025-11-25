@@ -1,0 +1,44 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn import svm
+from sklearn.datasets import make_circles
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+
+def demo_kernel_svm():
+    # synthetic non-linear dataset (two concentric circles)
+    X, y = make_circles(n_samples=400, factor=0.4, noise=0.08, random_state=0)
+    # scale
+    scaler = StandardScaler()
+    X = scaler.fit_transform(X)
+
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=1)
+
+    # RBF SVM
+    clf = svm.SVC(kernel='rbf', C=1.0, gamma='scale')  # gamma='scale' is default in newer sklearn
+    clf.fit(X_train, y_train)
+
+    print("Train acc:", clf.score(X_train, y_train))
+    print("Test acc:", clf.score(X_test, y_test))
+    print("Number of support vectors per class:", clf.n_support_)
+
+    # Plot decision boundary and support vectors
+    xx = np.linspace(X[:,0].min()-0.5, X[:,0].max()+0.5, 400)
+    yy = np.linspace(X[:,1].min()-0.5, X[:,1].max()+0.5, 400)
+    XX, YY = np.meshgrid(xx, yy)
+    grid = np.c_[XX.ravel(), YY.ravel()]
+    Z = clf.decision_function(grid).reshape(XX.shape)
+
+    plt.figure(figsize=(7,6))
+    plt.contourf(XX, YY, Z > 0, alpha=0.1)
+    plt.contour(XX, YY, Z, levels=[-1.0, 0.0, 1.0], linestyles=['--','-','--'], colors='k')
+    plt.scatter(X[:,0], X[:,1], c=y, cmap='bwr', edgecolor='k', s=35)
+    # support vectors
+    sv = clf.support_vectors_
+    plt.scatter(sv[:,0], sv[:,1], s=100, facecolors='none', edgecolors='k', label='support vectors')
+    plt.title("RBF kernel SVM")
+    plt.legend()
+    plt.show()
+
+if __name__ == "__main__":
+    demo_kernel_svm()

@@ -1,0 +1,244 @@
+"""
+Implement Single-layer and Multilayer Perceptron with Backpropagation using Keras + TensorFlow
+File: mlp_backprop_keras_tf.py
+Reference (uploaded): /mnt/data/MLDL experiment list.pdf
+
+This script contains two self-contained examples:
+  1) Single-layer perceptron implemented with tf.keras (no hidden layer) trained on Iris (3-class)
+  2) Multilayer perceptron (MLP) with two hidden layers trained on Fashion MNIST (10-class)
+
+Each example includes data loading, preprocessing, model construction (Keras), training with
+backprop (model.fit), evaluation, and utilities for plotting training curves.
+
+Requirements:
+  - tensorflow (TF 2.x)
+  - numpy
+  - scikit-learn
+  - matplotlib
+
+Run examples from command line:
+  python mlp_backprop_keras_tf.py --example iris
+  python mlp_backprop_keras_tf.py --example fashion
+
+Set --save-model to save the trained model(s) to disk.
+
+"""
+
+import argparse
+import os
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder
+import matplotlib.pyplot as plt
+
+# Path to user-uploaded PDF (provided in this conversation) — kept here as a reference URL/path
+UPLOADED_PDF = "/mnt/data/MLDL experiment list.pdf"
+
+# Reproducibility
+SEED = 42
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
+# ----------------------------- Utilities -----------------------------
+
+def plot_history(history, title_prefix=""):
+    """Plot training & validation loss and accuracy stored in Keras History object."""
+    hist = history.history
+    epochs = range(1, len(hist['loss']) + 1)
+
+    plt.figure(figsize=(12, 4))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, hist['loss'], label='train loss')
+    if 'val_loss' in hist:
+        plt.plot(epochs, hist['val_loss'], label='val loss')
+    plt.title(f"{title_prefix} Loss")
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    # accuracy metric may be named 'accuracy' or 'sparse_categorical_accuracy'
+    acc_key = 'accuracy' if 'accuracy' in hist else 'sparse_categorical_accuracy'
+    plt.plot(epochs, hist[acc_key], label='train acc')
+    if 'val_' + acc_key in hist:
+        plt.plot(epochs, hist['val_' + acc_key], label='val acc')
+    plt.title(f"{title_prefix} Accuracy")
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy')
+    plt.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+# -------------------- Example 1: Single-layer perceptron (Iris) --------------------
+
+def run_iris_single_layer(epochs=100, batch_size=16, lr=0.01, save_model=False):
+    """Single-layer perceptron implemented with Keras (a single Dense layer with softmax).
+    This demonstrates backprop on a model with no hidden layers (logistic/softmax layer).
+    Dataset: Iris (3 classes)
+    Labels are one-hot encoded and training uses categorical_crossentropy.
+    """
+    print("\n--- Iris: Single-layer perceptron (softmax) ---")
+    iris = load_iris()
+    X = iris.data  # (150, 4)
+    y = iris.target.reshape(-1, 1)  # (150, 1)
+
+    # One-hot encode
+    ohe = OneHotEncoder(sparse=False)
+    Y = ohe.fit_transform(y)
+
+    # Train/test split
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=SEED, stratify=Y)
+
+    # Feature scaling
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
+    n_features = X_train.shape[1]
+    n_classes = Y_train.shape[1]
+
+    # Build model: single dense softmax layer (no hidden layers)
+    model = keras.Sequential([
+        layers.Input(shape=(n_features,)),
+        layers.Dense(n_classes, activation='softmax', name='softmax_output')
+    ], name='single_layer_perceptron')
+
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=lr),
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    model.summary()
+
+    # Train
+    history = model.fit(
+        X_train, Y_train,
+        validation_split=0.1,
+        epochs=epochs,
+        batch_size=batch_size,
+        verbose=2
+    )
+
+    # Evaluate
+    loss, acc = model.evaluate(X_test, Y_test, verbose=0)
+    print(f"\nTest loss: {loss:.4f}   Test accuracy: {acc:.4f}")
+
+    plot_history(history, title_prefix='Iris (Single-layer)')
+
+    if save_model:
+        out_dir = 'saved_models'
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, 'iris_single_layer.h5')
+        model.save(path)
+        print(f"Model saved to: {path}")
+
+    # Return model and scaler for potential use
+    return model, scaler
+
+# -------------------- Example 2: Multilayer Perceptron (Fashion MNIST) --------------------
+
+def run_fashion_mnist_mlp(epochs=20, batch_size=128, lr=1e-3, save_model=False):
+    """Multilayer perceptron (2 hidden layers) for Fashion MNIST dataset.
+    Uses ReLU activations, Dropout, and categorical_crossentropy.
+    This demonstrates backprop through multiple layers.
+    """
+    print("\n--- Fashion MNIST: Multilayer Perceptron (MLP) ---")
+
+    # Load dataset (built-in)
+    (x_train, y_train), (x_test, y_test) = keras.datasets.fashion_mnist.load_data()
+    # Normalize and flatten
+    x_train = x_train.astype('float32') / 255.0
+    x_test = x_test.astype('float32') / 255.0
+
+    # Flatten images for MLP
+    x_train = x_train.reshape((-1, 28*28))
+    x_test = x_test.reshape((-1, 28*28))
+
+    # Convert labels to one-hot
+    num_classes = 10
+    y_train_cat = keras.utils.to_categorical(y_train, num_classes)
+    y_test_cat  = keras.utils.to_categorical(y_test, num_classes)
+
+    # Optionally shuffle / small subset for quick demo
+    # build model
+    model = keras.Sequential([
+        layers.Input(shape=(28*28,)),
+        layers.Dense(512, activation='relu'),
+        layers.Dropout(0.3),
+        layers.Dense(256, activation='relu'),
+        layers.Dropout(0.3),
+        layers.Dense(num_classes, activation='softmax')
+    ], name='mlp_fashion_mnist')
+
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=lr),
+        loss='categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    model.summary()
+
+    # Callbacks
+    callbacks = [
+        keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True),
+        keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, verbose=1)
+    ]
+
+    history = model.fit(
+        x_train, y_train_cat,
+        validation_split=0.1,
+        epochs=epochs,
+        batch_size=batch_size,
+        callbacks=callbacks,
+        verbose=2
+    )
+
+    # Evaluate
+    test_loss, test_acc = model.evaluate(x_test, y_test_cat, verbose=0)
+    print(f"\nTest loss: {test_loss:.4f}   Test accuracy: {test_acc:.4f}")
+
+    plot_history(history, title_prefix='Fashion MNIST (MLP)')
+
+    if save_model:
+        out_dir = 'saved_models'
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, 'fashion_mnist_mlp.h5')
+        model.save(path)
+        print(f"Model saved to: {path}")
+
+    return model
+
+# ----------------------------- Main & CLI -----------------------------
+
+def main():
+    parser = argparse.ArgumentParser(description='Single-layer and Multilayer Perceptron examples using Keras/TensorFlow')
+    parser.add_argument('--example', choices=['iris', 'fashion'], default='iris', help='Which example to run')
+    parser.add_argument('--epochs', type=int, default=None, help='Number of epochs (overrides defaults)')
+    parser.add_argument('--batch-size', type=int, default=None, help='Batch size (overrides defaults)')
+    parser.add_argument('--lr', type=float, default=None, help='Learning rate (overrides defaults)')
+    parser.add_argument('--save-model', action='store_true', help='Save trained model to disk')
+
+    args = parser.parse_args()
+
+    if args.example == 'iris':
+        epochs = args.epochs if args.epochs is not None else 100
+        batch_size = args.batch_size if args.batch_size is not None else 16
+        lr = args.lr if args.lr is not None else 0.01
+        run_iris_single_layer(epochs=epochs, batch_size=batch_size, lr=lr, save_model=args.save_model)
+    else:
+        epochs = args.epochs if args.epochs is not None else 20
+        batch_size = args.batch_size if args.batch_size is not None else 128
+        lr = args.lr if args.lr is not None else 1e-3
+        run_fashion_mnist_mlp(epochs=epochs, batch_size=batch_size, lr=lr, save_model=args.save_model)
+
+
+if __name__ == '__main__':
+    main()

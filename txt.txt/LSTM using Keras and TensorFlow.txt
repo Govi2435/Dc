@@ -1,0 +1,93 @@
+"""
+lstm_imdb.py
+
+LSTM-based model for IMDB sentiment classification.
+Run: python lstm_imdb.py
+
+Reference uploaded file: /mnt/data/MLDL experiment list.pdf
+"""
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+import matplotlib.pyplot as plt
+import os
+
+SEED = 42
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
+def build_lstm(vocab_size=20000, embed_dim=128, lstm_units=128, maxlen=200, bidirectional=False):
+    inputs = keras.Input(shape=(maxlen,), dtype='int32')
+    x = layers.Embedding(input_dim=vocab_size, output_dim=embed_dim, input_length=maxlen)(inputs)
+    if bidirectional:
+        x = layers.Bidirectional(layers.LSTM(lstm_units))(x)
+    else:
+        x = layers.LSTM(lstm_units)(x)
+    x = layers.Dense(64, activation='relu')(x)
+    x = layers.Dropout(0.4)(x)
+    outputs = layers.Dense(1, activation='sigmoid')(x)
+    model = keras.Model(inputs, outputs, name='lstm_imdb')
+    return model
+
+def plot_history(history, title_prefix=""):
+    h = history.history
+    epochs = range(1, len(h['loss']) + 1)
+    plt.figure(figsize=(10,4))
+    plt.subplot(1,2,1)
+    plt.plot(epochs, h['loss'], label='train loss')
+    plt.plot(epochs, h['val_loss'], label='val loss')
+    plt.title(f"{title_prefix} Loss")
+    plt.legend()
+    plt.subplot(1,2,2)
+    plt.plot(epochs, h['accuracy'], label='train acc')
+    plt.plot(epochs, h['val_accuracy'], label='val acc')
+    plt.title(f"{title_prefix} Accuracy")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+def main():
+    # Hyperparameters
+    vocab_size = 20000
+    maxlen = 200
+    embed_dim = 128
+    lstm_units = 128
+    batch_size = 64
+    epochs = 6
+    bidirectional = False  # set True to use Bidirectional(LSTM)
+    model_dir = "saved_models_lstm"
+    os.makedirs(model_dir, exist_ok=True)
+
+    # Load data
+    (x_train, y_train), (x_test, y_test) = keras.datasets.imdb.load_data(num_words=vocab_size)
+    x_train = keras.preprocessing.sequence.pad_sequences(x_train, maxlen=maxlen, padding='post', truncating='post')
+    x_test  = keras.preprocessing.sequence.pad_sequences(x_test,  maxlen=maxlen, padding='post', truncating='post')
+
+    # Build and compile
+    model = build_lstm(vocab_size=vocab_size, embed_dim=embed_dim, lstm_units=lstm_units, maxlen=maxlen, bidirectional=bidirectional)
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3),
+                  loss='binary_crossentropy', metrics=['accuracy'])
+    model.summary()
+
+    # Train
+    history = model.fit(x_train, y_train,
+                        validation_split=0.2,
+                        epochs=epochs,
+                        batch_size=batch_size,
+                        callbacks=[keras.callbacks.EarlyStopping(monitor='val_loss', patience=2, restore_best_weights=True)],
+                        verbose=2)
+
+    # Evaluate
+    loss, acc = model.evaluate(x_test, y_test, verbose=2)
+    print(f"\nTest loss: {loss:.4f}  Test accuracy: {acc:.4f}")
+
+    # Save
+    model.save(os.path.join(model_dir, "lstm_imdb.h5"))
+    print("Saved model to", os.path.join(model_dir, "lstm_imdb.h5"))
+
+    # Plot
+    plot_history(history, title_prefix="LSTM (IMDB)")
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,341 @@
+"""
+autoencoders_keras_tf.py
+
+Implements:
+  - Dense Autoencoder (MNIST)
+  - Convolutional Autoencoder (MNIST)
+  - Variational Autoencoder (MNIST)  [optional]
+
+Usage:
+  python autoencoders_keras_tf.py --example dense
+  python autoencoders_keras_tf.py --example conv
+  python autoencoders_keras_tf.py --example vae
+
+Requirements:
+  pip install tensorflow numpy matplotlib
+
+Reference (uploaded): /mnt/data/MLDL experiment list.pdf
+"""
+
+import argparse
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+
+SEED = 42
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
+
+# ---------------------------
+# Utilities
+# ---------------------------
+def show_reconstructions(x_test, x_decoded, n=10, figsize=(12, 3), title=None):
+    plt.figure(figsize=figsize)
+    for i in range(n):
+        # original
+        ax = plt.subplot(2, n, i + 1)
+        plt.imshow(x_test[i].squeeze(), cmap="gray")
+        plt.axis("off")
+        if i == 0 and title:
+            ax.set_title("Original")
+        # reconstructed
+        ax = plt.subplot(2, n, n + i + 1)
+        plt.imshow(x_decoded[i].squeeze(), cmap="gray")
+        plt.axis("off")
+        if i == 0 and title:
+            ax.set_title("Reconstructed")
+    plt.tight_layout()
+    plt.show()
+
+
+# ---------------------------
+# Example 1: Dense Autoencoder (MNIST)
+# ---------------------------
+def run_dense_autoencoder(epochs=20, batch_size=256, latent_dim=64, save_model=False):
+    print("\n--- Dense Autoencoder (MNIST) ---")
+
+    # Load MNIST
+    (x_train, _), (x_test, _) = keras.datasets.mnist.load_data()
+    x_train = x_train.astype("float32") / 255.0
+    x_test = x_test.astype("float32") / 255.0
+
+    # Flatten images
+    x_train_flat = x_train.reshape((len(x_train), -1))  # (N, 784)
+    x_test_flat = x_test.reshape((len(x_test), -1))
+
+    input_dim = x_train_flat.shape[1]
+
+    # Build encoder
+    encoder_inputs = keras.Input(shape=(input_dim,))
+    x = layers.Dense(512, activation="relu")(encoder_inputs)
+    x = layers.Dense(256, activation="relu")(x)
+    latent = layers.Dense(latent_dim, activation="relu", name="latent")(x)
+    encoder = keras.Model(encoder_inputs, latent, name="encoder")
+    encoder.summary()
+
+    # Build decoder
+    latent_inputs = keras.Input(shape=(latent_dim,))
+    x = layers.Dense(256, activation="relu")(latent_inputs)
+    x = layers.Dense(512, activation="relu")(x)
+    outputs = layers.Dense(input_dim, activation="sigmoid")(x)
+    decoder = keras.Model(latent_inputs, outputs, name="decoder")
+    decoder.summary()
+
+    # Autoencoder = encoder + decoder
+    ae_input = keras.Input(shape=(input_dim,))
+    z = encoder(ae_input)
+    recon = decoder(z)
+    autoencoder = keras.Model(ae_input, recon, name="dense_autoencoder")
+    autoencoder.compile(optimizer=keras.optimizers.Adam(1e-3), loss="mse", metrics=["mse"])
+    autoencoder.summary()
+
+    # Train
+    history = autoencoder.fit(
+        x_train_flat, x_train_flat,
+        epochs=epochs,
+        batch_size=batch_size,
+        shuffle=True,
+        validation_data=(x_test_flat, x_test_flat),
+        verbose=2
+    )
+
+    # Reconstruct
+    decoded_flat = autoencoder.predict(x_test_flat)
+    decoded_imgs = decoded_flat.reshape((-1, 28, 28))
+
+    # Show reconstructions
+    show_reconstructions(x_test, decoded_imgs, n=10, title="Dense AE")
+
+    # Save
+    if save_model:
+        os.makedirs("saved_models", exist_ok=True)
+        ae_path = os.path.join("saved_models", "dense_autoencoder.h5")
+        autoencoder.save(ae_path)
+        print("Saved model to:", ae_path)
+    return autoencoder, encoder, decoder, history
+
+
+# ---------------------------
+# Example 2: Convolutional Autoencoder (MNIST)
+# ---------------------------
+def run_conv_autoencoder(epochs=30, batch_size=128, latent_dim=32, save_model=False):
+    print("\n--- Convolutional Autoencoder (MNIST) ---")
+
+    # Load MNIST
+    (x_train, _), (x_test, _) = keras.datasets.mnist.load_data()
+    x_train = x_train.astype("float32") / 255.0
+    x_test = x_test.astype("float32") / 255.0
+
+    # Add channel dim
+    x_train = np.expand_dims(x_train, -1)  # (N, 28, 28, 1)
+    x_test = np.expand_dims(x_test, -1)
+
+    input_shape = x_train.shape[1:]
+
+    # Encoder
+    inputs = keras.Input(shape=input_shape)
+    x = layers.Conv2D(32, 3, activation="relu", padding="same")(inputs)
+    x = layers.MaxPooling2D(2, padding="same")(x)   # 14x14x32
+    x = layers.Conv2D(64, 3, activation="relu", padding="same")(x)
+    x = layers.MaxPooling2D(2, padding="same")(x)   # 7x7x64
+    x = layers.Conv2D(128, 3, activation="relu", padding="same")(x)
+    x = layers.Flatten()(x)
+    latent = layers.Dense(latent_dim, name="latent")(x)  # bottleneck
+    encoder = keras.Model(inputs, latent, name="conv_encoder")
+    encoder.summary()
+
+    # Decoder
+    latent_inputs = keras.Input(shape=(latent_dim,))
+    x = layers.Dense(7 * 7 * 128, activation="relu")(latent_inputs)
+    x = layers.Reshape((7, 7, 128))(x)
+    x = layers.Conv2DTranspose(64, 3, strides=1, padding="same", activation="relu")(x)
+    x = layers.UpSampling2D(2)(x)  # 14x14x64
+    x = layers.Conv2DTranspose(32, 3, strides=1, padding="same", activation="relu")(x)
+    x = layers.UpSampling2D(2)(x)  # 28x28x32
+    x = layers.Conv2D(1, 3, activation="sigmoid", padding="same")(x)
+    decoder = keras.Model(latent_inputs, x, name="conv_decoder")
+    decoder.summary()
+
+    # Autoencoder
+    ae_inputs = keras.Input(shape=input_shape)
+    z = encoder(ae_inputs)
+    recon = decoder(z)
+    autoencoder = keras.Model(ae_inputs, recon, name="conv_autoencoder")
+    autoencoder.compile(optimizer=keras.optimizers.Adam(1e-3), loss="binary_crossentropy")
+    autoencoder.summary()
+
+    # Train
+    history = autoencoder.fit(
+        x_train, x_train,
+        epochs=epochs,
+        batch_size=batch_size,
+        shuffle=True,
+        validation_data=(x_test, x_test),
+        verbose=2
+    )
+
+    # Reconstruct
+    decoded_imgs = autoencoder.predict(x_test)
+
+    # Show reconstructions
+    show_reconstructions(x_test, decoded_imgs, n=10, title="Conv AE")
+
+    # Save
+    if save_model:
+        os.makedirs("saved_models", exist_ok=True)
+        ae_path = os.path.join("saved_models", "conv_autoencoder.h5")
+        autoencoder.save(ae_path)
+        print("Saved model to:", ae_path)
+    return autoencoder, encoder, decoder, history
+
+
+# ---------------------------
+# Example 3: Variational Autoencoder (VAE) - simple implementation
+# ---------------------------
+class Sampling(layers.Layer):
+    """Uses (z_mean, z_log_var) to sample z, the vector encoding a digit."""
+    def call(self, inputs):
+        z_mean, z_log_var = inputs
+        epsilon = tf.random.normal(shape=tf.shape(z_mean))
+        return z_mean + tf.exp(0.5 * z_log_var) * epsilon
+
+
+def run_vae(epochs=30, batch_size=128, latent_dim=2, beta=1.0, save_model=False):
+    """
+    Simple VAE on MNIST. Latent_dim small (2) so we can visualize the space.
+    beta: weight for KL term (beta-VAE if beta != 1)
+    """
+    print("\n--- Variational Autoencoder (MNIST) ---")
+
+    (x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()
+    x_train = x_train.astype("float32") / 255.0
+    x_test = x_test.astype("float32") / 255.0
+    x_train = np.expand_dims(x_train, -1)
+    x_test = np.expand_dims(x_test, -1)
+    input_shape = x_train.shape[1:]
+
+    # Encoder
+    encoder_inputs = keras.Input(shape=input_shape)
+    x = layers.Conv2D(32, 3, activation="relu", strides=2, padding="same")(encoder_inputs)
+    x = layers.Conv2D(64, 3, activation="relu", strides=2, padding="same")(x)
+    x = layers.Flatten()(x)
+    x = layers.Dense(128, activation="relu")(x)
+    z_mean = layers.Dense(latent_dim, name="z_mean")(x)
+    z_log_var = layers.Dense(latent_dim, name="z_log_var")(x)
+    z = Sampling()([z_mean, z_log_var])
+    encoder = keras.Model(encoder_inputs, [z_mean, z_log_var, z], name="vae_encoder")
+    encoder.summary()
+
+    # Decoder
+    latent_inputs = keras.Input(shape=(latent_dim,))
+    x = layers.Dense(7 * 7 * 64, activation="relu")(latent_inputs)
+    x = layers.Reshape((7, 7, 64))(x)
+    x = layers.Conv2DTranspose(64, 3, strides=2, padding="same", activation="relu")(x)
+    x = layers.Conv2DTranspose(32, 3, strides=2, padding="same", activation="relu")(x)
+    decoder_outputs = layers.Conv2D(1, 3, activation="sigmoid", padding="same")(x)
+    decoder = keras.Model(latent_inputs, decoder_outputs, name="vae_decoder")
+    decoder.summary()
+
+    # VAE model that computes loss manually
+    class VAE(keras.Model):
+        def __init__(self, encoder, decoder, beta=1.0, **kwargs):
+            super(VAE, self).__init__(**kwargs)
+            self.encoder = encoder
+            self.decoder = decoder
+            self.beta = beta
+            self.total_loss_tracker = keras.metrics.Mean(name="total_loss")
+            self.reconstruction_loss_tracker = keras.metrics.Mean(name="recon_loss")
+            self.kl_loss_tracker = keras.metrics.Mean(name="kl_loss")
+
+        @property
+        def metrics(self):
+            return [self.total_loss_tracker, self.reconstruction_loss_tracker, self.kl_loss_tracker]
+
+        def train_step(self, data):
+            if isinstance(data, tuple):
+                data = data[0]
+            with tf.GradientTape() as tape:
+                z_mean, z_log_var, z = self.encoder(data)
+                reconstruction = self.decoder(z)
+                # reconstruction loss (binary crossentropy per image)
+                recon_loss = tf.reduce_mean(
+                    tf.reduce_sum(keras.losses.binary_crossentropy(data, reconstruction), axis=(1, 2))
+                )
+                kl_loss = -0.5 * tf.reduce_mean(tf.reduce_sum(1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var), axis=1))
+                total_loss = recon_loss + self.beta * kl_loss
+            grads = tape.gradient(total_loss, self.trainable_weights)
+            self.optimizer.apply_gradients(zip(grads, self.trainable_weights))
+            self.total_loss_tracker.update_state(total_loss)
+            self.reconstruction_loss_tracker.update_state(recon_loss)
+            self.kl_loss_tracker.update_state(kl_loss)
+            return {"loss": self.total_loss_tracker.result(),
+                    "reconstruction_loss": self.reconstruction_loss_tracker.result(),
+                    "kl_loss": self.kl_loss_tracker.result()}
+
+        def call(self, inputs):
+            z_mean, z_log_var, z = self.encoder(inputs)
+            return self.decoder(z)
+
+    vae = VAE(encoder, decoder, beta=beta)
+    vae.compile(optimizer=keras.optimizers.Adam(1e-3))
+
+    # Train
+    history = vae.fit(x_train, epochs=epochs, batch_size=batch_size, validation_data=(x_test, None), verbose=2)
+
+    # Encode test set to visualize latent if latent_dim==2
+    z_mean, z_log_var, z = encoder.predict(x_test, batch_size=batch_size)
+    if z_mean.shape[1] == 2:
+        plt.figure(figsize=(6, 6))
+        plt.scatter(z_mean[:, 0], z_mean[:, 1], c=y_test, cmap="tab10", s=2)
+        plt.colorbar()
+        plt.title("VAE latent space (means)")
+        plt.show()
+
+    # Reconstruct and show
+    decoded = vae.predict(x_test[:20])
+    decoded = decoded.reshape((-1, 28, 28))
+    show_reconstructions(x_test[:20], decoded, n=10, title="VAE Reconstructions")
+
+    if save_model:
+        os.makedirs("saved_models", exist_ok=True)
+        vae.encoder.save(os.path.join("saved_models", "vae_encoder.h5"))
+        vae.decoder.save(os.path.join("saved_models", "vae_decoder.h5"))
+        print("Saved VAE encoder & decoder")
+    return vae, encoder, decoder, history
+
+
+# ---------------------------
+# CLI
+# ---------------------------
+def main():
+    parser = argparse.ArgumentParser(description="Autoencoders examples (dense / conv / vae) with Keras")
+    parser.add_argument("--example", choices=["dense", "conv", "vae"], default="dense")
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--latent-dim", type=int, default=None)
+    parser.add_argument("--save", action="store_true", help="Save trained model(s)")
+    args = parser.parse_args()
+
+    if args.example == "dense":
+        epochs = args.epochs if args.epochs is not None else 20
+        batch = args.batch_size if args.batch_size is not None else 256
+        latent = args.latent_dim if args.latent_dim is not None else 64
+        run_dense_autoencoder(epochs=epochs, batch_size=batch, latent_dim=latent, save_model=args.save)
+    elif args.example == "conv":
+        epochs = args.epochs if args.epochs is not None else 30
+        batch = args.batch_size if args.batch_size is not None else 128
+        latent = args.latent_dim if args.latent_dim is not None else 32
+        run_conv_autoencoder(epochs=epochs, batch_size=batch, latent_dim=latent, save_model=args.save)
+    else:
+        epochs = args.epochs if args.epochs is not None else 30
+        batch = args.batch_size if args.batch_size is not None else 128
+        latent = args.latent_dim if args.latent_dim is not None else 2
+        run_vae(epochs=epochs, batch_size=batch, latent_dim=latent, save_model=args.save)
+
+
+if __name__ == "__main__":
+    main()
